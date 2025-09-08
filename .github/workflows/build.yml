@@ -54,12 +54,12 @@ jobs:
             docker rm caupolican || true
 
             # Create directories
-            mkdir -p /srv/caupolican/out
+            mkdir -p /tmp/caupolican/out
 
             # Run the container
             docker run -d --name caupolican \
-            --env-file /srv/caupolican/router.env \
-            -v /srv/caupolican/out:/out \
+            --env-file /tmp/caupolican/router.env \
+            -v /tmp/caupolican/out:/out \
             -p 80:8080 \
             --ulimit nofile=65536:65536 \
             --restart=always \
