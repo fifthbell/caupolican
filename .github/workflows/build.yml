@@ -56,9 +56,13 @@ jobs:
             # Create directories
             mkdir -p /tmp/caupolican/out
 
-            # Run the container
+            # Run the container with environment variables
             docker run -d --name caupolican \
-            --env-file /tmp/caupolican/router.env \
+            -e TARGET_DURATION=2 \
+            -e WINDOW_SEGMENTS=15 \
+            -e STANDBY_TEXT="Caupolican — Standby" \
+            -e CHANNELS="news,sports" \
+            -e OUT_ROOT="/out" \
             -v /tmp/caupolican/out:/out \
             -p 80:8080 \
             --ulimit nofile=65536:65536 \

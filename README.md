@@ -42,8 +42,11 @@ docker pull ghcr.io/${{ github.repository_owner }}/caupolican:latest
 docker run -d –name cuapolican \
   –restart=always \
   –ulimit nofile=65536:65536 \
-  –env-file /srv/caupolican/router.env \
-  -v /srv/caupolican/out:/out \
+  -e TARGET_DURATION=2 \
+  -e WINDOW_SEGMENTS=15 \
+  -e STANDBY_TEXT="Caupolican — Standby" \
+  -e CHANNELS="news,sports" \
+  -v /tmp/caupolican/out:/out \
   -p 80:8080 \
   ghcr.io/${{ github.repository_owner }}/caupolican:latest
 ```
@@ -72,7 +75,7 @@ Deployment is automatic on push to `main`. The workflow builds the image, pushes
 
 Prerequisites:
 - Set GitHub Secrets: `DEPLOYMENT_TOKEN`, `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`
-- Create `/srv/caupolican/.env` on the server with `CHANNELS=news,sports`, `ROUTER_TOKEN=...`, etc.
+- Environment variables are configured in the GitHub Actions workflow
 
 ## Environment Variables
 
