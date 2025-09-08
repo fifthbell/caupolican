@@ -64,7 +64,7 @@ jobs:
             -e CHANNELS="news,sports" \
             -e OUT_ROOT="/out" \
             -v /tmp/caupolican/out:/out \
-            -p 80:9999 \
+            -p 9999:9999 \
             --ulimit nofile=65536:65536 \
             --restart=always \
             ghcr.io/${{ github.repository }}:latest
