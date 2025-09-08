@@ -26,13 +26,13 @@ Hot switching: Workers copy/link segments from live or standby, inserting discon
 1. Build and run:
 ```
 docker build -t caupolican .
-docker run –rm -it -p 8888:8888 \
+docker run –rm -it -p 9999:9999 \
   -v $(pwd)/out:/out \
   caupolican
 ```
 
-2. API: http://localhost:8888/api/health
-3. HLS: http://localhost:8888/hls/news/index.m3u8 (after creating channel)
+2. API: http://localhost:9999/api/health
+3. HLS: http://localhost:9999/hls/news/index.m3u8 (after creating channel)
 
 ## Production
 
@@ -47,7 +47,7 @@ docker run -d –name cuapolican \
   -e STANDBY_TEXT="Caupolican — Standby" \
   -e CHANNELS="news,sports" \
   -v /tmp/caupolican/out:/out \
-  -p 80:8888 \
+  -p 80:9999 \
   ghcr.io/${{ github.repository_owner }}/caupolican:latest
 ```
 
