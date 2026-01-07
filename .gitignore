@@ -129,6 +129,10 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Node.js / npm
+node_modules/
+package-lock.json
+
 # Project-specific
 out/
 *.m3u8
