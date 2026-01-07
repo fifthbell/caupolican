@@ -104,6 +104,43 @@ git commit --no-verify -m "your message"
 
 **Note**: This should only be used in exceptional circumstances.
 
+## Branch Protection and Automation
+
+### Recommended GitHub Settings
+
+To fully enforce conventional commits, repository administrators should configure the following branch protection rules for the `main` branch:
+
+1. **Require status checks to pass before merging**
+   - Enable "Require status checks to pass before merging"
+   - Add the "Validate PR Title" workflow as a required check
+
+2. **Require pull request reviews before merging**
+   - Enable code review requirements as per project policy
+
+3. **Enable "Require linear history"** (Optional)
+   - This ensures all PRs are squash-merged or rebased, keeping commit history clean
+
+4. **Merge Strategy**
+   - Recommend using **"Squash and merge"** as the default merge method
+   - PR title becomes the commit message, ensuring all commits in `main` follow conventional format
+
+These settings ensure that:
+- All commits to `main` follow conventional commit format
+- PR titles are validated before merge
+- Manual commits are validated by Husky hooks
+- Automated/bot commits can be configured to follow the same format
+
+### Automated Commits
+
+For bots and automated processes, ensure they generate commit messages in the conventional format:
+```
+type(scope): description
+```
+
+For example:
+- Dependabot: `build(deps): bump package-name from 1.0.0 to 1.1.0`
+- Release automation: `chore(release): v1.2.3`
+
 ## Development Workflow
 
 1. Fork the repository
