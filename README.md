@@ -55,6 +55,7 @@ docker run -d –name cuapolican \
 
 - API: `/api/health`, `/api/channels`, `/api/channels/{id}/set-source`, `/api/channels/{id}/stop`
 - HLS: `http://host/hls/<channel>/index.m3u8`
+- Private Prometheus scrape: `/metrics`
 
 Channels are created dynamically when setting a source.
 
@@ -69,12 +70,37 @@ Channels are created dynamically when setting a source.
 
 Auth: If `ROUTER_TOKEN` set, include `Authorization: Bearer <token>` on POST/DELETE.
 
+## Observability
+
+`GET /metrics` exposes Prometheus text format and always requires
+`Authorization: Bearer <ROUTER_TOKEN>`. The endpoint fails closed with `503` if
+`ROUTER_TOKEN` is not configured and returns `401` for a missing or invalid
+credential. Production passes the token from the `ROUTER_TOKEN` GitHub secret;
+the Prometheus scraper must use that same credential, and deployment networking
+must restrict access to the scraper.
+
+The collector exports:
+
+- service/build identity plus Python, garbage-collection, and process metrics;
+- HTTP request count and duration with only method, normalized route template,
+  and status class labels;
+- FFmpeg and filesystem dependency outcomes;
+- current live/standby worker counts and disk-usage ratio;
+- bounded worker transition, restart/backoff, stall, periodic cleanup,
+  disk-pressure cleanup, and segment cleanup outcomes.
+
+Metrics never label channel IDs, source URLs, filesystem paths, tokens, or raw
+errors. Application instrumentation and its private endpoint are maintained in
+this repository. Scrape configuration, storage, dashboards, and alerts remain a
+deployment dependency of `gaulatti/prometheus` and are intentionally outside
+this ticket.
+
 ## Production Deploy
 
 Deployment is automatic on push to `main`. The workflow builds the image, pushes to GHCR, and deploys to the on-premises server.
 
 Prerequisites:
-- Set GitHub Secrets: `DEPLOYMENT_TOKEN`, `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`
+- Set GitHub Secrets: `DEPLOYMENT_TOKEN`, `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `ROUTER_TOKEN`
 - Environment variables are configured in the GitHub Actions workflow
 
 ## Environment Variables
@@ -85,7 +111,7 @@ Prerequisites:
 - `WINDOW_SEGMENTS`: 6
 - `STANDBY_TEXT`: Text for slate
 - `STANDBY_IMAGE`: Optional image path
-- `ROUTER_TOKEN`: Optional bearer token
+- `ROUTER_TOKEN`: Bearer token for control mutations and the private Prometheus scrape; required for `/metrics`
 - `RESTART_MAX`: 6
 - `BACKOFF_BASE_MS`: 500
 - `BACKOFF_FACTOR`: 2.0

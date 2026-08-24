@@ -3,16 +3,21 @@ import asyncio
 import subprocess
 import threading
 import shutil
+import time
 from typing import Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from .channel_worker import ChannelWorker
 from .hls_utils import mkdir_p, rmrf
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from .channel_worker import ChannelWorker
-from .hls_utils import mkdir_p, rmrf
+from .metrics import (
+    CLEANUP_RUNS,
+    DEPENDENCY_OPERATIONS,
+    SEGMENT_CLEANUPS,
+    observe_http,
+    refresh_runtime_state,
+    render_metrics,
+)
 
 app = FastAPI()
 
@@ -31,6 +36,20 @@ MAX_SEGMENTS_PER_CHANNEL = int(os.getenv("MAX_SEGMENTS_PER_CHANNEL", "100"))
 workers: Dict[str, ChannelWorker] = {}
 standby_process: Optional[subprocess.Popen] = None
 cleanup_task: Optional[asyncio.Task] = None
+
+
+@app.middleware("http")
+async def record_http_metrics(request: Request, call_next):
+    started_at = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", "unmatched")
+        observe_http(request.method, route_path, status_code, started_at)
 
 def check_disk_usage():
     """Check disk usage and clean up if approaching threshold"""
@@ -61,6 +80,7 @@ def check_disk_usage():
                 output_dir = os.path.join(OUT_ROOT, "out", channel_id)
                 if os.path.exists(output_dir):
                     rmrf(output_dir)
+                    SEGMENT_CLEANUPS.labels(reason="disk_pressure", result="success").inc()
                 del workers[channel_id]
             
             # Also clean up orphaned input directories
@@ -71,8 +91,14 @@ def check_disk_usage():
                     if os.path.isdir(item_path) and item not in ['standby'] and item not in workers:
                         print(f"Cleaning up orphaned input directory {item}")
                         rmrf(item_path)
+                        SEGMENT_CLEANUPS.labels(reason="orphan_directory", result="success").inc()
+
+            CLEANUP_RUNS.labels(kind="disk_pressure", result="success").inc()
+        else:
+            CLEANUP_RUNS.labels(kind="disk_pressure", result="not_required").inc()
                         
     except Exception as e:
+        CLEANUP_RUNS.labels(kind="disk_pressure", result="failure").inc()
         print(f"Error checking disk usage: {e}")
 
 def cleanup_orphaned_segments():
@@ -125,8 +151,10 @@ def cleanup_orphaned_segments():
                 for file_path, mtime, in_playlist in segment_files[:-segments_to_keep]:
                     try:
                         os.remove(file_path)
+                        SEGMENT_CLEANUPS.labels(reason="orphan_segment", result="success").inc()
                         print(f"Cleaned up old segment: {file_path}")
                     except Exception as e:
+                        SEGMENT_CLEANUPS.labels(reason="orphan_segment", result="failure").inc()
                         print(f"Error removing {file_path}: {e}")
                         
             except Exception as e:
@@ -139,13 +167,25 @@ async def periodic_cleanup():
     """Run cleanup periodically"""
     while True:
         await asyncio.sleep(30)  # Run every 30 seconds
-        cleanup_orphaned_segments()
+        try:
+            cleanup_orphaned_segments()
+            CLEANUP_RUNS.labels(kind="periodic", result="success").inc()
+        except Exception:
+            CLEANUP_RUNS.labels(kind="periodic", result="failure").inc()
 
 class SetSourceRequest(BaseModel):
     url: str
 
 def verify_token(authorization: Optional[str] = Header(None)):
     if ROUTER_TOKEN and (not authorization or authorization != f"Bearer {ROUTER_TOKEN}"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
+
+def verify_metrics_token(authorization: Optional[str] = Header(None)):
+    if not ROUTER_TOKEN:
+        raise HTTPException(status_code=503, detail="Metrics authentication is not configured")
+    if not authorization or authorization != f"Bearer {ROUTER_TOKEN}":
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
 
@@ -182,7 +222,16 @@ async def startup_event():
         "-hls_segment_filename", os.path.join(OUT_ROOT, "in", "standby", "segment_%03d.ts"),
         os.path.join(OUT_ROOT, "in", "standby", "index.m3u8")
     ]
-    standby_process = subprocess.Popen(cmd)
+    try:
+        standby_process = subprocess.Popen(cmd)
+        DEPENDENCY_OPERATIONS.labels(
+            dependency="ffmpeg", operation="start_standby", result="success"
+        ).inc()
+    except Exception:
+        DEPENDENCY_OPERATIONS.labels(
+            dependency="ffmpeg", operation="start_standby", result="failure"
+        ).inc()
+        raise
     
     # Start periodic cleanup task
     cleanup_task = asyncio.create_task(periodic_cleanup())
@@ -204,7 +253,7 @@ async def shutdown_event():
     if os.path.exists(OUT_ROOT):
         rmrf(OUT_ROOT)
 
-app.mount("/hls", StaticFiles(directory=OUT_ROOT), name="hls")
+app.mount("/hls", StaticFiles(directory=OUT_ROOT, check_dir=False), name="hls")
 
 @app.get("/api/health")
 async def health():
@@ -212,6 +261,12 @@ async def health():
         "ok": True,
         "channels": {id: worker.status() for id, worker in workers.items()}
     }
+
+
+@app.get("/metrics", dependencies=[Depends(verify_metrics_token)], include_in_schema=False)
+async def metrics():
+    refresh_runtime_state(workers, OUT_ROOT)
+    return Response(content=render_metrics(), media_type="text/plain; version=0.0.4")
 
 @app.get("/api/channels")
 async def list_channels():
@@ -265,5 +320,6 @@ async def delete_channel(channel_id: str):
     output_dir = os.path.join(OUT_ROOT, "out", channel_id)
     if os.path.exists(output_dir):
         rmrf(output_dir)
+        SEGMENT_CLEANUPS.labels(reason="channel_delete", result="success").inc()
     del workers[channel_id]
     return {"ok": True}
