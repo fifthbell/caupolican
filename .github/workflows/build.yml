@@ -25,7 +25,9 @@ jobs:
       # Build the Docker image
       - name: Build Docker image
         run: |
-          docker build -t ghcr.io/${{ github.repository }}:latest .
+          docker build \
+            --build-arg BUILD_VERSION=${{ github.sha }} \
+            -t ghcr.io/${{ github.repository }}:latest .
 
       # Push the Docker image to GHCR
       - name: Push Docker image to GHCR
@@ -63,6 +65,7 @@ jobs:
             -e STANDBY_TEXT="Caupolican — Standby" \
             -e CHANNELS="news,sports" \
             -e OUT_ROOT="/out" \
+            -e ROUTER_TOKEN="${{ secrets.ROUTER_TOKEN }}" \
             -v /tmp/caupolican/out:/out \
             -p 9999:9999 \
             --ulimit nofile=65536:65536 \

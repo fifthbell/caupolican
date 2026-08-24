@@ -5,6 +5,13 @@ import threading
 import shutil
 from typing import Optional, List, Tuple
 from .hls_utils import mkdir_p, rmrf, atomic_write_text, hardlink_or_copy
+from .metrics import (
+    DEPENDENCY_OPERATIONS,
+    SEGMENT_CLEANUPS,
+    WORKER_RESTARTS,
+    WORKER_STALL_CHECKS,
+    WORKER_TRANSITIONS,
+)
 import m3u8
 
 class ChannelWorker:
@@ -45,7 +52,12 @@ class ChannelWorker:
             self.current_source = 'live'
             self.discontinuity = True
             self.last_processed = 0
-            self._start_live()
+            try:
+                self._start_live()
+                WORKER_TRANSITIONS.labels(transition="set_live", result="success").inc()
+            except Exception:
+                WORKER_TRANSITIONS.labels(transition="set_live", result="failure").inc()
+                raise
 
     def stop_source(self):
         with self.lock:
@@ -57,15 +69,20 @@ class ChannelWorker:
             self.live_url = None
             self.current_source = 'standby'
             self.discontinuity = True
-            # Clean up input directory
             input_dir = os.path.join(self.out_root, "in", self.channel_id)
             if os.path.exists(input_dir):
                 rmrf(input_dir)
+        WORKER_TRANSITIONS.labels(transition="set_standby", result="success").inc()
 
     def reset_window(self):
         with self.lock:
-            rmrf(os.path.join(self.out_root, "out", self.channel_id, "segments"))
-            mkdir_p(os.path.join(self.out_root, "out", self.channel_id, "segments"))
+            try:
+                rmrf(os.path.join(self.out_root, "out", self.channel_id, "segments"))
+                mkdir_p(os.path.join(self.out_root, "out", self.channel_id, "segments"))
+                SEGMENT_CLEANUPS.labels(reason="window_reset", result="success").inc()
+            except OSError:
+                SEGMENT_CLEANUPS.labels(reason="window_reset", result="failure").inc()
+                raise
             self.window = []
             self.media_seq = 0
             self.last_processed = 0
@@ -95,8 +112,14 @@ class ChannelWorker:
                                     self.media_seq += 1
                                     # Clean up old segments when exceeding window or max segments
                                     while len(self.window) > self.window_segments or len(self.window) > self.max_segments:
+                                        reason = "window" if len(self.window) > self.window_segments else "limit"
                                         old_uri, _, _ = self.window.pop(0)
-                                        os.remove(os.path.join(self.out_root, "out", self.channel_id, "segments", old_uri))
+                                        try:
+                                            os.remove(os.path.join(self.out_root, "out", self.channel_id, "segments", old_uri))
+                                            SEGMENT_CLEANUPS.labels(reason=reason, result="success").inc()
+                                        except OSError:
+                                            SEGMENT_CLEANUPS.labels(reason=reason, result="failure").inc()
+                                            raise
                                     self.last_processed = seg_num
                         self._write_playlist()
                     except Exception as e:
@@ -137,7 +160,16 @@ class ChannelWorker:
             cmd.insert(1, "-rw_timeout")
             cmd.insert(2, "15000000")
         mkdir_p(os.path.join(self.out_root, "in", self.channel_id))
-        self.live_process = subprocess.Popen(cmd)
+        try:
+            self.live_process = subprocess.Popen(cmd)
+            DEPENDENCY_OPERATIONS.labels(
+                dependency="ffmpeg", operation="start_live", result="success"
+            ).inc()
+        except Exception:
+            DEPENDENCY_OPERATIONS.labels(
+                dependency="ffmpeg", operation="start_live", result="failure"
+            ).inc()
+            raise
 
     def _handle_crash(self):
         self.stop_source()
@@ -145,16 +177,26 @@ class ChannelWorker:
             backoff = min(int(os.getenv("BACKOFF_BASE_MS", "500")) * (int(os.getenv("BACKOFF_FACTOR", "2.0")) ** self.restart_count), int(os.getenv("BACKOFF_CAP_MS", "30000")))
             time.sleep(backoff / 1000)
             self.restart_count += 1
-            self._start_live()
+            try:
+                self._start_live()
+                WORKER_RESTARTS.labels(result="success").inc()
+            except Exception:
+                WORKER_RESTARTS.labels(result="failure").inc()
+                raise
         else:
             self.restart_count = 0
+            WORKER_RESTARTS.labels(result="exhausted").inc()
 
     def _check_stall(self):
         if not self.active:
+            WORKER_STALL_CHECKS.labels(result="inactive").inc()
             return False
         playlist_path = os.path.join(self.out_root, "in", self.channel_id, "index.m3u8")
         if os.path.exists(playlist_path):
-            return time.time() - os.path.getmtime(playlist_path) > self.stall_threshold
+            stalled = time.time() - os.path.getmtime(playlist_path) > self.stall_threshold
+            WORKER_STALL_CHECKS.labels(result="stalled" if stalled else "healthy").inc()
+            return stalled
+        WORKER_STALL_CHECKS.labels(result="missing_playlist").inc()
         return True
 
     def _write_playlist(self):

@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 ENV PYTHONPATH=/app
+ARG BUILD_VERSION=development
+ENV CAUPOLICAN_BUILD_VERSION=$BUILD_VERSION
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

@@ -1,0 +1,55 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Verify container scrape boundary
+        run: |
+          docker build --build-arg BUILD_VERSION=${{ github.sha }} -t caupolican:test .
+          docker run -d --name caupolican-test \
+            -e ROUTER_TOKEN=ci-runtime-token \
+            -p 9999:9999 \
+            caupolican:test
+          trap 'docker rm -f caupolican-test' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9999/api/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:9999/metrics)" = "401"
+          curl -fsS \
+            -H 'Authorization: Bearer ci-runtime-token' \
+            http://127.0.0.1:9999/metrics > /tmp/caupolican-metrics.txt
+          python - <<'PY'
+          from pathlib import Path
+          from prometheus_client.parser import text_string_to_metric_families
+
+          payload = Path("/tmp/caupolican-metrics.txt").read_text()
+          families = {family.name for family in text_string_to_metric_families(payload)}
+          assert "caupolican_service_info" in families
+          assert "caupolican_http_requests" in families
+          assert "process_cpu_seconds" in families
+          assert "${{ github.sha }}" in payload
+          PY
