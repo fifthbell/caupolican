@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, x64, helix]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -41,7 +41,7 @@ jobs:
           retention-days: 1
 
   deploy:
-    runs-on: [self-hosted, linux, x64, helix]
+    runs-on: ubuntu-latest
     needs: build
 
     steps:
