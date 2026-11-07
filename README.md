@@ -97,10 +97,10 @@ this ticket.
 
 ## Production Deploy
 
-Deployment is automatic on push to `main`. The workflow builds the image, pushes to GHCR, and deploys to the on-premises server.
+Deployment runs on push to `main` and on manual dispatch. The workflow builds an immutable image on the Helix runner, ships it to the application host as an artifact (no registry login or token), loads it, replaces the `caupolican` container, and waits for `/api/health`. A failed start restores the previous container.
 
 Prerequisites:
-- Set GitHub Secrets: `DEPLOYMENT_TOKEN`, `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `ROUTER_TOKEN`
+- Set GitHub Secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `ROUTER_TOKEN`
 - Environment variables are configured in the GitHub Actions workflow
 
 ## Environment Variables
