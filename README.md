@@ -97,7 +97,7 @@ this ticket.
 
 ## Production Deploy
 
-Deployment runs on push to `main` and on manual dispatch. The workflow builds an immutable image on the Helix runner, ships it to the application host as an artifact (no registry login or token), loads it, replaces the `caupolican` container, and waits for `/api/health`. A failed start restores the previous container.
+Deployment runs on push to `main` and on manual dispatch. The workflow builds an immutable image on a GitHub-hosted runner (the org Helix pool does not serve public repositories), ships it to the application host as an artifact (no registry login or token), loads it, replaces the `caupolican` container, and waits for `/api/health`. A failed start restores the previous container.
 
 Prerequisites:
 - Set GitHub Secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `ROUTER_TOKEN`
